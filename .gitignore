@@ -1,31 +1,53 @@
-# OS files
+# macOS
 .DS_Store
-Thumbs.db
 
-# Python virtual environment
+# Virtual environments
 venv/
 .venv/
 env/
 .env/
 
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Data files (large)
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Data files (large files)
 *.csv
 *.csv.gz
 data/*.csv
 data/*.csv.gz
 
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
+# Model outputs
+outputs/*.csv
+outputs/*.pkl
+outputs/*.joblib
+*.pkl
+*.joblib
 
 # MLflow
 mlruns/
+mlartifacts/
 
 # IDE
 .idea/
@@ -33,15 +55,10 @@ mlruns/
 *.swp
 *.swo
 
-# Output files
-outputs/*.csv
+# Logs
+*.log
+logs/
 
-# Byte-compiled / optimized / DLL files
-*.pyc
-*.pyo
-*.pyd
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+# Environment variables
+.env
+.env.local

@@ -144,8 +144,7 @@ def load_data(
 def merge_target(
     X_train: pd.DataFrame,
     y_train: pd.DataFrame,
-    config: Optional[Dict[str, Any]] = None,
-    drop_na_target: bool = True
+    config: Optional[Dict[str, Any]] = None
 ) -> pd.DataFrame:
     """
     Merge target values with training features.
@@ -154,7 +153,6 @@ def merge_target(
         X_train: Training features DataFrame
         y_train: Training target DataFrame
         config: Configuration dictionary
-        drop_na_target: Whether to drop rows with NaN target values
         
     Returns:
         Merged DataFrame with target column
@@ -175,14 +173,6 @@ def merge_target(
         # Assume same order
         df = X_train.copy()
         df[target_col] = y_train[target_col].values
-    
-    # Drop rows with NaN target values
-    if drop_na_target:
-        n_before = len(df)
-        df = df.dropna(subset=[target_col])
-        n_after = len(df)
-        if n_before != n_after:
-            print(f"Dropped {n_before - n_after} rows with NaN target values")
     
     return df
 

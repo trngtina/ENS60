@@ -413,8 +413,9 @@ def get_feature_list(
     df: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
     exclude_raw: bool = False,
-    exclude_target: bool = True
-) -> List[str]:
+    exclude_target: bool = True,
+    include_id: bool = False
+) -> Tuple[List[str], List[str]]:
     """
     Get list of feature columns for modeling.
     
@@ -423,9 +424,10 @@ def get_feature_list(
         config: Configuration dictionary
         exclude_raw: Whether to exclude raw return/volume columns
         exclude_target: Whether to exclude target column
+        include_id: Whether to include stock ID (pid) as a categorical feature
         
     Returns:
-        List of feature column names
+        Tuple of (feature_columns, categorical_columns)
     """
     if config is None:
         config = load_config()
@@ -438,8 +440,16 @@ def get_feature_list(
     # Start with all columns
     feature_cols = list(df.columns)
     
-    # Remove ID and day columns (used for grouping, not features)
-    feature_cols = [col for col in feature_cols if col not in [id_col, day_col]]
+    # Remove day column (used for grouping, not features)
+    feature_cols = [col for col in feature_cols if col != day_col]
+    
+    # Handle ID column
+    categorical_cols = []
+    if include_id:
+        if id_col in feature_cols:
+            categorical_cols.append(id_col)
+    else:
+        feature_cols = [col for col in feature_cols if col != id_col]
     
     # Remove target
     if exclude_target and target_col in feature_cols:
@@ -449,7 +459,7 @@ def get_feature_list(
     if exclude_raw:
         feature_cols = [col for col in feature_cols if col not in return_cols + volume_cols]
     
-    return feature_cols
+    return feature_cols, categorical_cols
 
 
 def get_engineered_feature_names() -> List[str]:
