@@ -1,0 +1,208 @@
+# ENS Challenge 60 - Configuration File
+# Stock Auction Volume Prediction
+
+# =============================================================================
+# DATA PATHS
+# =============================================================================
+data:
+  train_input: "data/input_training.csv.gz"
+  train_output: "data/output_training_IxKGwDV.csv"
+  test_input: "data/input_test.csv.gz"
+  submission_example: "data/submission_csv_file_random_example.csv"
+  output_dir: "outputs"
+
+# =============================================================================
+# FEATURE COLUMNS
+# =============================================================================
+features:
+  # Column names
+  return_cols_prefix: "abs_ret"
+  volume_cols_prefix: "rel_vol"
+  n_periods: 61
+  
+  # Static columns
+  id_col: "pid"
+  day_col: "day"
+  target_col: "target"
+  
+  # Additional columns
+  extra_cols:
+    - "LS"
+    - "NLV"
+
+# =============================================================================
+# PREPROCESSING
+# =============================================================================
+preprocessing:
+  # Missing value handling
+  nan_strategy: "interpolate"  # Options: "interpolate", "zero", "mean", "median"
+  create_nan_features: true
+  
+  # Scaling (for neural networks)
+  scale_features: false
+  scaler_type: "standard"  # Options: "standard", "minmax", "robust"
+
+# =============================================================================
+# FEATURE ENGINEERING
+# =============================================================================
+feature_engineering:
+  # Statistical aggregations
+  aggregations:
+    returns:
+      - "min"
+      - "max"
+      - "std"
+      - "median"
+      - "sum"
+      - "mean"
+    volumes:
+      - "min"
+      - "max"
+      - "std"
+      - "median"
+      - "mean"
+      - "skew"
+      - "kurt"
+  
+  # Temporal features (Phase 2)
+  lag_features:
+    enabled: false
+    lags: [1, 2, 3, 7, 14]
+  
+  rolling_features:
+    enabled: false
+    windows: [7, 14, 30]
+  
+  # Domain features
+  domain_features:
+    eod_concentration: true
+    vol_price_interaction: true
+    return_momentum: true
+    vol_skew: true
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
+validation:
+  # Time series split
+  n_splits: 5
+  
+  # Custom split (optional)
+  custom_split:
+    enabled: false
+    train_end_day: 600
+    val_end_day: 700
+  
+  # Metrics
+  metrics:
+    - "rmse"
+    - "mae"
+    - "r2"
+
+# =============================================================================
+# MODELS
+# =============================================================================
+models:
+  # Linear baseline
+  linear:
+    enabled: true
+    alpha: 1.0  # Ridge regularization
+  
+  # LightGBM
+  lightgbm:
+    enabled: true
+    params:
+      objective: "regression"
+      metric: "rmse"
+      boosting_type: "gbdt"
+      num_leaves: 45
+      max_depth: 7
+      learning_rate: 0.05
+      n_estimators: 1000
+      min_child_samples: 211
+      subsample: 0.52
+      colsample_bytree: 0.79
+      reg_alpha: 2
+      reg_lambda: 20
+      random_state: 42
+      verbose: -1
+    early_stopping_rounds: 50
+  
+  # CatBoost (Phase 2)
+  catboost:
+    enabled: false
+    params:
+      iterations: 1000
+      learning_rate: 0.05
+      depth: 7
+      l2_leaf_reg: 10
+      random_seed: 42
+      verbose: false
+    early_stopping_rounds: 50
+  
+  # XGBoost (Phase 2)
+  xgboost:
+    enabled: false
+    params:
+      objective: "reg:squarederror"
+      max_depth: 7
+      learning_rate: 0.05
+      n_estimators: 1000
+      subsample: 0.8
+      colsample_bytree: 0.8
+      random_state: 42
+  
+  # Neural Network (Phase 3)
+  rnn:
+    enabled: false
+    params:
+      hidden_size: 128
+      num_layers: 2
+      embedding_dim: 32
+      dropout: 0.3
+      learning_rate: 0.001
+      batch_size: 256
+      epochs: 100
+
+# =============================================================================
+# ENSEMBLE
+# =============================================================================
+ensemble:
+  enabled: false
+  method: "stacking"  # Options: "stacking", "weighted_average", "blending"
+  
+  # Stacking
+  stacking:
+    meta_model: "ridge"
+    meta_alpha: 1.0
+  
+  # Weighted average
+  weights:
+    linear: 0.1
+    lightgbm: 0.4
+    catboost: 0.3
+    xgboost: 0.2
+
+# =============================================================================
+# HYPERPARAMETER TUNING
+# =============================================================================
+tuning:
+  enabled: false
+  method: "optuna"  # Options: "optuna", "grid", "random"
+  n_trials: 100
+  timeout: 3600  # seconds
+
+# =============================================================================
+# MLFLOW
+# =============================================================================
+mlflow:
+  enabled: true
+  experiment_name: "ENS60_Auction_Volume"
+  tracking_uri: "mlruns"
+  log_models: true
+  log_artifacts: true
+
+# =============================================================================
+# RANDOM SEED
+# =============================================================================
+seed: 42
