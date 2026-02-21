@@ -8,6 +8,7 @@ import numpy as np
 from typing import Dict, Tuple, Optional, Any, List, Generator
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.base import clone
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -259,6 +260,8 @@ def cross_validate(
     y: pd.Series,
     validator: Optional[TimeSeriesValidator] = None,
     n_splits: int = 5,
+    split_df: Optional[pd.DataFrame] = None,
+    fit_kwargs: Optional[Dict[str, Any]] = None,
     config: Optional[Dict[str, Any]] = None,
     verbose: bool = True
 ) -> Dict[str, Any]:
@@ -271,6 +274,8 @@ def cross_validate(
         y: Target Series
         validator: TimeSeriesValidator instance (if None, creates one)
         n_splits: Number of splits (if validator is None)
+        split_df: DataFrame used only for generating temporal splits (e.g., day column only)
+        fit_kwargs: Additional keyword arguments passed to model.fit per fold
         config: Configuration dictionary
         verbose: Whether to print progress
         
@@ -283,11 +288,16 @@ def cross_validate(
     if validator is None:
         validator = TimeSeriesValidator(n_splits=n_splits, config=config)
     
+    if split_df is not None and len(split_df) != len(X):
+        raise ValueError(f"split_df length ({len(split_df)}) must match X length ({len(X)})")
+    
     fold_metrics = []
     oof_predictions = np.zeros(len(X))
     oof_mask = np.zeros(len(X), dtype=bool)
+    split_source = split_df if split_df is not None else X
+    fit_kwargs = fit_kwargs or {}
     
-    for fold, (train_idx, val_idx) in enumerate(validator.split(X)):
+    for fold, (train_idx, val_idx) in enumerate(validator.split(split_source)):
         if verbose:
             print(f"Fold {fold + 1}/{validator.get_n_splits()}")
         
@@ -295,11 +305,14 @@ def cross_validate(
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
+        # Clone model to ensure fold isolation
+        fold_model = clone(model)
+        
         # Train model
-        model.fit(X_train, y_train)
+        fold_model.fit(X_train, y_train, **fit_kwargs)
         
         # Predict
-        y_pred = model.predict(X_val)
+        y_pred = fold_model.predict(X_val)
         
         # Store OOF predictions
         oof_predictions[val_idx] = y_pred

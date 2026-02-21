@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import yaml
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any, Literal
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -144,18 +144,24 @@ def load_data(
 def merge_target(
     X_train: pd.DataFrame,
     y_train: pd.DataFrame,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    align_mode: Literal["auto", "id", "position"] = "auto",
+    strict: bool = True
 ) -> pd.DataFrame:
     """
-    Merge target values with training features.
+    Merge target values with training features using strict alignment checks.
     
-    The target file rows correspond 1:1 with training input rows in order,
-    so we simply assign by position (ignoring the ID column in target file).
+    Alignment modes:
+    - "auto": Use ID-based alignment when both frames have "ID", else positional.
+    - "id": Force ID-based alignment (preserves X_train row order).
+    - "position": Force positional assignment.
     
     Args:
         X_train: Training features DataFrame
         y_train: Training target DataFrame
         config: Configuration dictionary
+        align_mode: Target alignment strategy ("auto", "id", or "position")
+        strict: Whether to raise errors on alignment inconsistencies
         
     Returns:
         Merged DataFrame with target column
@@ -164,15 +170,76 @@ def merge_target(
         config = load_config()
     
     target_col = config['features']['target_col']
+    row_id_col = 'ID'
     
-    # Verify lengths match
-    if len(X_train) != len(y_train):
-        raise ValueError(f"Length mismatch: X_train has {len(X_train)} rows, y_train has {len(y_train)} rows")
+    if align_mode not in {"auto", "id", "position"}:
+        raise ValueError(f"Unknown align_mode: {align_mode}")
     
-    # Assign target by position (files are in same order)
-    df = X_train.copy()
-    df[target_col] = y_train[target_col].values
+    if target_col not in y_train.columns:
+        raise ValueError(f"Target column '{target_col}' not found in y_train")
     
+    has_input_id = row_id_col in X_train.columns
+    has_target_id = row_id_col in y_train.columns
+    
+    mode = align_mode
+    if mode == "auto":
+        mode = "id" if has_input_id and has_target_id else "position"
+    
+    if mode == "id":
+        if not (has_input_id and has_target_id):
+            msg = "ID-based alignment requested but 'ID' column is missing in X_train or y_train"
+            if strict:
+                raise ValueError(msg)
+            warnings.warn(f"{msg}. Falling back to positional alignment.", RuntimeWarning)
+            mode = "position"
+        else:
+            if strict:
+                if X_train[row_id_col].isna().any() or y_train[row_id_col].isna().any():
+                    raise ValueError("Null values found in ID column during strict ID alignment")
+                if X_train[row_id_col].duplicated().any():
+                    raise ValueError("Duplicate IDs found in X_train during strict ID alignment")
+                if y_train[row_id_col].duplicated().any():
+                    raise ValueError("Duplicate IDs found in y_train during strict ID alignment")
+            
+            y_target = y_train[[row_id_col, target_col]]
+            df = X_train.merge(
+                y_target,
+                on=row_id_col,
+                how='left',
+                sort=False
+            )
+            
+            if strict:
+                missing_target = df[target_col].isna().sum()
+                if missing_target > 0:
+                    raise ValueError(
+                        f"Strict ID alignment failed: {missing_target} rows in X_train have no matching target"
+                    )
+                
+                missing_in_target = len(pd.Index(X_train[row_id_col]).difference(pd.Index(y_train[row_id_col])))
+                extra_in_target = len(pd.Index(y_train[row_id_col]).difference(pd.Index(X_train[row_id_col])))
+                if missing_in_target > 0 or extra_in_target > 0:
+                    raise ValueError(
+                        f"Strict ID alignment mismatch: {missing_in_target} IDs missing in y_train, "
+                        f"{extra_in_target} extra IDs in y_train"
+                    )
+            return df
+    
+    # Positional alignment
+    n_x = len(X_train)
+    n_y = len(y_train)
+    if strict and n_x != n_y:
+        raise ValueError(f"Length mismatch in strict positional alignment: X_train={n_x}, y_train={n_y}")
+    
+    n_rows = min(n_x, n_y)
+    if n_x != n_y and not strict:
+        warnings.warn(
+            f"Non-strict positional alignment with length mismatch: using first {n_rows} rows",
+            RuntimeWarning
+        )
+    
+    df = X_train.iloc[:n_rows].copy()
+    df[target_col] = y_train[target_col].iloc[:n_rows].values
     return df
 
 
@@ -237,16 +304,18 @@ def create_submission(
     predictions: np.ndarray,
     X_test: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
-    output_path: Optional[str] = None
+    output_path: Optional[str] = None,
+    validate_against_example: bool = False
 ) -> pd.DataFrame:
     """
-    Create submission file from predictions.
+    Create submission file from predictions using test row IDs.
     
     Args:
         predictions: Array of predictions
         X_test: Test DataFrame (for ID creation)
         config: Configuration dictionary
         output_path: Path to save submission (optional)
+        validate_against_example: Whether to validate shape/ID range against example file
         
     Returns:
         Submission DataFrame
@@ -254,11 +323,39 @@ def create_submission(
     if config is None:
         config = load_config()
     
-    # Create submission DataFrame
+    pred_arr = np.asarray(predictions).reshape(-1)
+    if len(pred_arr) != len(X_test):
+        raise ValueError(
+            f"Predictions length ({len(pred_arr)}) does not match X_test length ({len(X_test)})"
+        )
+    
+    if 'ID' not in X_test.columns:
+        raise ValueError("X_test must contain an 'ID' column to build submission")
+    
+    test_ids = X_test['ID']
+    if test_ids.isna().any():
+        raise ValueError("X_test contains null IDs")
+    if test_ids.duplicated().any():
+        raise ValueError("X_test contains duplicate IDs")
+    
+    # Create submission DataFrame with true test IDs
     submission = pd.DataFrame({
-        'ID': range(len(predictions)),
-        config['features']['target_col']: predictions
+        'ID': test_ids.values,
+        config['features']['target_col']: pred_arr
     })
+    
+    if validate_against_example:
+        example_path = config['data'].get('submission_example')
+        if example_path and Path(example_path).exists():
+            example = pd.read_csv(example_path, usecols=['ID'])
+            if len(example) != len(submission):
+                raise ValueError(
+                    f"Submission length ({len(submission)}) does not match example length ({len(example)})"
+                )
+            if submission['ID'].iloc[0] != example['ID'].iloc[0] or submission['ID'].iloc[-1] != example['ID'].iloc[-1]:
+                raise ValueError(
+                    "Submission ID range does not match example file ID range"
+                )
     
     # Save if path provided
     if output_path is not None:

@@ -292,6 +292,103 @@ def create_temporal_features(
     return df
 
 
+def create_non_leaky_temporal_features(
+    df: pd.DataFrame,
+    config: Optional[Dict[str, Any]] = None,
+    history_df: Optional[pd.DataFrame] = None,
+    lags: Optional[List[int]] = None,
+    windows: Optional[List[int]] = None,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """
+    Create inference-safe temporal features using only past information.
+    
+    Features are generated per stock (`pid`) with shift(1) semantics to avoid
+    using current-row information from the same series window.
+    
+    Args:
+        df: Current dataset (train or test)
+        config: Configuration dictionary
+        history_df: Optional past dataframe used as history context (e.g., train when building test)
+        lags: Lag steps to create
+        windows: Rolling window sizes for lagged rolling means
+        verbose: Whether to print information
+    
+    Returns:
+        DataFrame with non-leaky temporal features added
+    """
+    if config is None:
+        config = load_config()
+    
+    id_col = config['features']['id_col']
+    day_col = config['features']['day_col']
+    lags = lags or [1, 3, 7]
+    windows = windows or [3, 7, 14]
+    
+    df_out = df.copy()
+    n_features_before = len(df_out.columns)
+    
+    # Candidate columns available at inference time
+    candidate_cols = [col for col in ['NLV', 'median_vol', 'std_ret'] if col in df_out.columns]
+    if not candidate_cols:
+        if verbose:
+            print("No candidate columns found for non-leaky temporal features; skipping")
+        return df_out
+    
+    if verbose:
+        print("Creating non-leaky temporal features...")
+    
+    current_sorted = df_out.sort_values([id_col, day_col]).copy()
+    current_sorted['__original_index'] = current_sorted.index
+    current_sorted['__is_current'] = True
+    
+    if history_df is not None:
+        # Keep only compatible history columns needed for temporal construction
+        history_cols = [id_col, day_col] + [col for col in candidate_cols if col in history_df.columns]
+        history_part = history_df[history_cols].copy()
+        history_part = history_part.sort_values([id_col, day_col])
+        history_part['__is_current'] = False
+        full = pd.concat([history_part, current_sorted], axis=0, ignore_index=False, sort=False)
+    else:
+        full = current_sorted.copy()
+    
+    full = full.sort_values([id_col, day_col]).copy()
+    
+    created_cols = []
+    for base_col in candidate_cols:
+        # Lag features
+        for lag in lags:
+            feat_col = f'{base_col}_lag_{lag}'
+            full[feat_col] = full.groupby(id_col)[base_col].shift(lag)
+            created_cols.append(feat_col)
+        
+        # Rolling mean features from lagged series
+        lagged_col = full.groupby(id_col)[base_col].shift(1)
+        for window in windows:
+            feat_col = f'{base_col}_roll_mean_{window}'
+            full[feat_col] = lagged_col.groupby(full[id_col]).transform(
+                lambda x: x.rolling(window=window, min_periods=1).mean()
+            )
+            created_cols.append(feat_col)
+    
+    # Map back current rows in original order
+    current_only = full[full['__is_current'] == True].copy()
+    current_only = current_only.sort_values('__original_index')
+    
+    for col in created_cols:
+        df_out[col] = current_only[col].values
+    
+    # Fill NaNs from insufficient history with 0
+    if created_cols:
+        df_out[created_cols] = df_out[created_cols].fillna(0)
+    
+    if verbose:
+        n_features_after = len(df_out.columns)
+        print(f"  Created {n_features_after - n_features_before} non-leaky temporal features")
+    
+    return df_out
+
+
 def create_day_features(
     df: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
@@ -350,6 +447,8 @@ def create_features(
     include_domain: bool = True,
     include_nlv: bool = True,
     include_day: bool = True,
+    include_non_leaky_temporal: bool = False,
+    temporal_history_df: Optional[pd.DataFrame] = None,
     include_temporal: bool = False,
     target_col: Optional[str] = None,
     verbose: bool = True
@@ -364,6 +463,8 @@ def create_features(
         include_domain: Include domain-specific features
         include_nlv: Include NLV interaction features
         include_day: Include day-level features
+        include_non_leaky_temporal: Include inference-safe lag/rolling features
+        temporal_history_df: Optional history dataframe used when creating non-leaky temporal features
         include_temporal: Include temporal/lag features (careful with leakage!)
         target_col: Target column name (required for temporal features)
         verbose: Whether to print information
@@ -387,6 +488,15 @@ def create_features(
     # Domain-specific features
     if include_domain:
         df = create_domain_features(df, config, verbose)
+    
+    # Inference-safe temporal features (does not use target)
+    if include_non_leaky_temporal:
+        df = create_non_leaky_temporal_features(
+            df=df,
+            config=config,
+            history_df=temporal_history_df,
+            verbose=verbose
+        )
     
     # NLV interaction features
     if include_nlv:
