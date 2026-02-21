@@ -437,18 +437,27 @@ def get_feature_list(
     day_col = config['features']['day_col']
     target_col = config['features']['target_col']
     
+    # Columns to always exclude (not features)
+    exclude_cols = {
+        day_col,           # Day is for temporal splitting, not prediction
+        'ID',              # Row identifier from target file
+        'index',           # Pandas index if present
+    }
+    
     # Start with all columns
     feature_cols = list(df.columns)
     
-    # Remove day column (used for grouping, not features)
-    feature_cols = [col for col in feature_cols if col != day_col]
+    # Remove excluded columns
+    feature_cols = [col for col in feature_cols if col not in exclude_cols]
     
-    # Handle ID column
+    # Handle stock ID (pid) column - should be categorical, not numeric
     categorical_cols = []
     if include_id:
         if id_col in feature_cols:
             categorical_cols.append(id_col)
+            # Keep pid in feature_cols for LightGBM (it handles categoricals)
     else:
+        # Remove pid entirely if not using as categorical
         feature_cols = [col for col in feature_cols if col != id_col]
     
     # Remove target
