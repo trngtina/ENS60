@@ -149,6 +149,9 @@ def merge_target(
     """
     Merge target values with training features.
     
+    The target file rows correspond 1:1 with training input rows in order,
+    so we simply assign by position (ignoring the ID column in target file).
+    
     Args:
         X_train: Training features DataFrame
         y_train: Training target DataFrame
@@ -162,17 +165,13 @@ def merge_target(
     
     target_col = config['features']['target_col']
     
-    # Check if ID column exists in y_train
-    if 'ID' in y_train.columns:
-        # Merge on ID
-        df = X_train.copy()
-        df['ID'] = range(len(df))
-        df = df.merge(y_train[['ID', target_col]], on='ID', how='left')
-        df = df.drop('ID', axis=1)
-    else:
-        # Assume same order
-        df = X_train.copy()
-        df[target_col] = y_train[target_col].values
+    # Verify lengths match
+    if len(X_train) != len(y_train):
+        raise ValueError(f"Length mismatch: X_train has {len(X_train)} rows, y_train has {len(y_train)} rows")
+    
+    # Assign target by position (files are in same order)
+    df = X_train.copy()
+    df[target_col] = y_train[target_col].values
     
     return df
 
